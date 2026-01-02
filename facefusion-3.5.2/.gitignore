@@ -1,0 +1,33 @@
+# Python / venv
+.venv/
+__pycache__/
+*.pyc
+
+# Среды Conda/Poetry/pipenv (если есть)
+env/
+venv/
+*.egg-info/
+
+# Файлы конфигурации с секретами
+.env
+
+# FaceFusion модели/кэш/выходы
+facefusion-3.5.2/.cache/
+facefusion-3.5.2/models/
+facefusion-3.5.2/.facefusion/
+jobs_path/
+temp_path/
+output_path/
+source_paths/
+target_path/
+
+# Логи
+*.log
+
+__pycache__
+.assets
+.claude
+.caches
+.idea
+.jobs
+.vscode
