@@ -13,6 +13,7 @@ venv/
 
 # FaceFusion модели/кэш/выходы
 facefusion-3.5.2/.cache/
+facefusion-3.5.2/.caches/
 facefusion-3.5.2/models/
 facefusion-3.5.2/.facefusion/
 jobs_path/
@@ -20,6 +21,18 @@ temp_path/
 output_path/
 source_paths/
 target_path/
+examples/
+
+# Android
+android/.gradle/
+android/.idea/
+android/**/build/
+android/local.properties
+android/**/*.apk
+android/**/*.aab
+*.iml
+*.jks
+*.keystore
 
 # Логи
 *.log

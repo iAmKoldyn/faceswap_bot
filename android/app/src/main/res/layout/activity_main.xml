@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    tools:context=".MainActivity">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/titleText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="FaceFusion Mobile MVP"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/editBaseUrl"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:inputType="textUri"
+            android:hint="Base URL" />
+
+        <TextView
+            android:id="@+id/txtHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Tip: Android Emulator uses http://10.0.2.2:8000"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/authLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Authorization" />
+
+        <EditText
+            android:id="@+id/editAccessToken"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:hint="Access token (paste here, no Bearer)"
+            android:inputType="textVisiblePassword|textNoSuggestions" />
+
+        <TextView
+            android:id="@+id/txtAuthStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Auth: not set" />
+
+        <TextView
+            android:id="@+id/serviceLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Service" />
+
+        <Button
+            android:id="@+id/btnHealth"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Health check" />
+
+        <TextView
+            android:id="@+id/txtHealth"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Health: unknown" />
+
+        <EditText
+            android:id="@+id/editJobId"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="Job ID (optional)"
+            android:inputType="textNoSuggestions" />
+
+        <Button
+            android:id="@+id/btnCheckJob"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Check job status" />
+
+        <TextView
+            android:id="@+id/txtJobStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Job: n/a" />
+
+        <TextView
+            android:id="@+id/modeLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Mode" />
+
+        <RadioGroup
+            android:id="@+id/radioMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <RadioButton
+                android:id="@+id/modePhotoVideoFast"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="Photo -> Video (fast)" />
+
+            <RadioButton
+                android:id="@+id/modePhotoVideoQuality"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Photo -> Video (quality)" />
+
+            <RadioButton
+                android:id="@+id/modePhotoPhotoGpen"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Photo -> Photo (gpen)" />
+
+            <RadioButton
+                android:id="@+id/modePhotoPhotoCodeformer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Photo -> Photo (codeformer)" />
+        </RadioGroup>
+
+        <Button
+            android:id="@+id/btnPickSource"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Pick source photo" />
+
+        <TextView
+            android:id="@+id/txtSource"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Source: not selected" />
+
+        <Button
+            android:id="@+id/btnPickTarget"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Pick target" />
+
+        <TextView
+            android:id="@+id/txtTarget"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Target: not selected" />
+
+        <Button
+            android:id="@+id/btnStart"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Start job" />
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:max="100"
+            android:progress="0" />
+
+        <TextView
+            android:id="@+id/txtStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Status: idle" />
+
+        <ImageView
+            android:id="@+id/imgResult"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:adjustViewBounds="true"
+            android:visibility="gone" />
+
+        <VideoView
+            android:id="@+id/videoResult"
+            android:layout_width="match_parent"
+            android:layout_height="240dp"
+            android:layout_marginTop="12dp"
+            android:visibility="gone" />
+
+    </LinearLayout>
+</ScrollView>

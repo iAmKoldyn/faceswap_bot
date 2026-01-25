@@ -1,0 +1,195 @@
+{
+  "info": {
+    "name": "FaceFusion API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Postman collection for FaceFusion FastAPI server."
+  },
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/health"
+      }
+    },
+    {
+      "name": "Create Job",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mode\": \"{{mode}}\"\n}"
+        },
+        "url": "{{base_url}}/jobs"
+      }
+    },
+    {
+      "name": "Upload Source",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "file", "type": "file", "src": "{{source_file}}" }
+          ]
+        },
+        "url": "{{base_url}}/jobs/{{job_id}}/source"
+      }
+    },
+    {
+      "name": "Upload Target (Photo)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "file", "type": "file", "src": "{{target_photo}}" }
+          ]
+        },
+        "url": "{{base_url}}/jobs/{{job_id}}/target"
+      }
+    },
+    {
+      "name": "Upload Target (Video)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "file", "type": "file", "src": "{{target_video}}" }
+          ]
+        },
+        "url": "{{base_url}}/jobs/{{job_id}}/target"
+      }
+    },
+    {
+      "name": "Submit Job",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "reference_frame_number",
+              "value": "{{reference_frame}}",
+              "type": "text"
+            }
+          ]
+        },
+        "url": "{{base_url}}/jobs/{{job_id}}/submit"
+      }
+    },
+    {
+      "name": "Set Webhook",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"{{webhook_url}}\",\n  \"events\": [\"queued\", \"running\", \"completed\", \"failed\"]\n}"
+        },
+        "url": "{{base_url}}/jobs/{{job_id}}/webhook"
+      }
+    },
+    {
+      "name": "Get Job",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "url": "{{base_url}}/jobs/{{job_id}}"
+      }
+    },
+    {
+      "name": "Job Events (SSE)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" },
+          { "key": "Accept", "value": "text/event-stream" }
+        ],
+        "url": "{{base_url}}/jobs/{{job_id}}/events"
+      }
+    },
+    {
+      "name": "Get Result",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "url": "{{base_url}}/jobs/{{job_id}}/result"
+      }
+    },
+    {
+      "name": "Quick Job (Photo)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "mode", "value": "{{mode_photo}}", "type": "text" },
+            { "key": "source", "type": "file", "src": "{{source_file}}" },
+            { "key": "target", "type": "file", "src": "{{target_photo}}" }
+          ]
+        },
+        "url": "{{base_url}}/jobs/quick"
+      }
+    },
+    {
+      "name": "Quick Job (Video)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt}}" }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "mode", "value": "{{mode_video}}", "type": "text" },
+            { "key": "source", "type": "file", "src": "{{source_file}}" },
+            { "key": "target", "type": "file", "src": "{{target_video}}" }
+          ]
+        },
+        "url": "{{base_url}}/jobs/quick"
+      }
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://127.0.0.1:8000" },
+    { "key": "project_root", "value": "C:\\\\Users\\\\Nvidia\\\\Desktop\\\\Kwork_labs\\\\TG" },
+    { "key": "jwt", "value": "PUT_JWT_HERE" },
+    { "key": "mode", "value": "photo_video_fast" },
+    { "key": "mode_photo", "value": "photo_photo_gpen" },
+    { "key": "mode_video", "value": "photo_video_fast" },
+    { "key": "job_id", "value": "" },
+    { "key": "source_file", "value": "{{project_root}}\\\\examples\\\\bagrat.jpg" },
+    { "key": "target_photo", "value": "{{project_root}}\\\\examples\\\\naur.jpg" },
+    { "key": "target_video", "value": "{{project_root}}\\\\examples\\\\video.mp4" },
+    { "key": "reference_frame", "value": "" },
+    { "key": "webhook_url", "value": "https://example.com/webhook" }
+  ]
+}

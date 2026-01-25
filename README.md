@@ -55,8 +55,74 @@
 - `/mode <name>` — смена режима вручную.
 - `/reset` — сброс текущей загрузки (отмена).
 
+## API сервер (для мобильного приложения)
+Локальный HTTP API для приёма файлов, создания job и выдачи результата.
+
+Запуск:
+```bash
+python server.py
+```
+Или через uvicorn:
+```bash
+uvicorn server:app --host 0.0.0.0 --port 8000
+```
+
+### Авторизация (JWT)
+API ожидает заголовок:
+```
+Authorization: Bearer <JWT>
+```
+По умолчанию `JWT_REQUIRED=1`. Укажи в `.env`:
+```env
+JWT_SECRET=your_secret
+JWT_ALG=HS256
+JWT_REQUIRED=1
+```
+Токен должен содержать `sub` или `user_id`. Все job привязаны к `owner_id`.
+
+### Webhooks
+Можно подписаться на события job:
+```
+POST /jobs/{job_id}/webhook
+{
+  "url": "https://example.com/webhook",
+  "events": ["queued", "running", "completed", "failed"]
+}
+```
+
+### Token minting (manual)
+Generate a JWT locally (no HTTP endpoint):
+```
+python -m backend.mint_token --user-id demo
+```
+Make sure `.env` contains:
+```env
+JWT_SECRET=your_secret
+JWT_ALG=HS256
+JWT_REQUIRED=1
+```
+
+### Прогресс
+`GET /jobs/{job_id}` возвращает `stage` и `progress` (0–100), которые обновляются при парсинге логов FaceFusion.
+
+Базовые эндпоинты:
+- `POST /jobs` — создать job (body: `{ "mode": "photo_video_fast" }`)
+- `POST /jobs/{job_id}/source` — загрузить source (jpg/png)
+- `POST /jobs/{job_id}/target` — загрузить target (jpg/png или mp4/mov)
+- `POST /jobs/{job_id}/submit` — поставить в очередь
+- `GET /jobs/{job_id}` — статус
+- `GET /jobs/{job_id}/events` — SSE stream (text/event-stream)
+- `GET /jobs/{job_id}/result` — скачать результат
+- `POST /jobs/quick` — быстрый запуск (source+target в одном запросе)
+
+Примечания:
+- Видео до 60 МБ и до 2 минут.
+- Очереди разделены: видео (GPU) и фото (CPU).
+- Для внешнего доступа используйте cloudflared/ngrok или VPN (ZeroTier).
+
 ## Структура
 - `bot.py` — логика бота, inline/reply UI, очереди, валидации.
+- `server.py` — FastAPI сервер для мобильного приложения.
 - `facefusion-3.5.2/` — ванильная FaceFusion 3.5.2 с фиксами (в т.ч. лок по inference pool).
 - Папки данных (игнорируются git): `jobs_path`, `source_paths`, `target_path`, `output_path`, `temp_path`, кэши моделей.
 
