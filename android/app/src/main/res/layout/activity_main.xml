@@ -140,11 +140,18 @@
         </RadioGroup>
 
         <Button
-            android:id="@+id/btnPickSource"
+            android:id="@+id/btnTakeSelfie"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="Pick source photo" />
+            android:text="Take selfie (source)" />
+
+        <Button
+            android:id="@+id/btnPickSource"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Pick source photo (gallery)" />
 
         <TextView
             android:id="@+id/txtSource"
@@ -157,7 +164,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Pick target" />
+            android:text="Pick target (gallery)" />
 
         <TextView
             android:id="@+id/txtTarget"

@@ -63,6 +63,10 @@ class WebhookRequest(BaseModel):
     events: Optional[list[str]] = None
 
 
+class AuthVerifyResponse(BaseModel):
+    user_id: str
+
+
 def assert_owner(job: Dict[str, str], user_id: str) -> None:
     if job.get("owner_id") != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
@@ -106,6 +110,11 @@ async def startup() -> None:
 @app.get("/health")
 async def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/auth/verify", response_model=AuthVerifyResponse)
+async def auth_verify(user_id: str = Depends(get_current_user)) -> AuthVerifyResponse:
+    return AuthVerifyResponse(user_id=user_id)
 
 
 @app.post("/jobs", response_model=JobResponse)

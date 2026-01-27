@@ -4,12 +4,18 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.widget.*
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
+import androidx.core.widget.addTextChangedListener
 import androidx.lifecycle.lifecycleScope
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
@@ -32,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var baseUrlEdit: EditText
     private lateinit var accessTokenEdit: EditText
     private lateinit var radioMode: RadioGroup
+    private lateinit var btnTakeSelfie: Button
     private lateinit var btnPickSource: Button
     private lateinit var btnPickTarget: Button
     private lateinit var btnStart: Button
@@ -50,22 +57,42 @@ class MainActivity : AppCompatActivity() {
 
     private var sourceUri: Uri? = null
     private var targetUri: Uri? = null
+    private var pendingSelfieUri: Uri? = null
     private var jwtToken: String? = null
+    private var authCheckJob: Job? = null
     private var sseCall: okhttp3.Call? = null
     private val gson = Gson()
     private var lastJobId: String? = null
 
-    private val pickSourceLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    private val pickSourceLauncher = registerForActivityResult(PickVisualMedia()) { uri ->
         uri?.let {
+            if (!isImageUri(it)) {
+                toast("Source must be a photo (jpg/jpeg/png)")
+                return@let
+            }
             sourceUri = it
             txtSource.text = "Source: selected"
         }
     }
 
-    private val pickTargetLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    private val pickTargetLauncher = registerForActivityResult(PickVisualMedia()) { uri ->
         uri?.let {
+            if (!isTargetAllowed(it)) {
+                val expected = if (isPhotoVideoMode()) "video (mp4/mov)" else "photo (jpg/jpeg/png)"
+                toast("Target must be $expected")
+                return@let
+            }
             targetUri = it
             txtTarget.text = "Target: selected"
+        }
+    }
+
+    private val takeSelfieLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success) {
+            pendingSelfieUri?.let {
+                sourceUri = it
+                txtSource.text = "Source: selfie"
+            }
         }
     }
 
@@ -76,6 +103,7 @@ class MainActivity : AppCompatActivity() {
         baseUrlEdit = findViewById(R.id.editBaseUrl)
         accessTokenEdit = findViewById(R.id.editAccessToken)
         radioMode = findViewById(R.id.radioMode)
+        btnTakeSelfie = findViewById(R.id.btnTakeSelfie)
         btnPickSource = findViewById(R.id.btnPickSource)
         btnPickTarget = findViewById(R.id.btnPickTarget)
         btnStart = findViewById(R.id.btnStart)
@@ -96,19 +124,37 @@ class MainActivity : AppCompatActivity() {
             baseUrlEdit.setText(BuildConfig.DEFAULT_BASE_URL)
         }
         txtAuthStatus.text = "Auth: not set"
-        btnPickTarget.text = if (isPhotoVideoMode()) "Pick target video" else "Pick target photo"
+        updateTargetUiForMode()
+
+        accessTokenEdit.addTextChangedListener {
+            scheduleAuthCheck()
+        }
+
+        btnTakeSelfie.setOnClickListener {
+            launchSelfieCapture()
+        }
 
         btnPickSource.setOnClickListener {
-            pickSourceLauncher.launch(arrayOf("image/*"))
+            pickSourceLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }
 
         btnPickTarget.setOnClickListener {
-            val mimeTypes = if (isPhotoVideoMode()) arrayOf("video/*") else arrayOf("image/*")
-            pickTargetLauncher.launch(mimeTypes)
+            val request = if (isPhotoVideoMode()) {
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+            } else {
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+            }
+            pickTargetLauncher.launch(request)
         }
 
         radioMode.setOnCheckedChangeListener { _, _ ->
-            btnPickTarget.text = if (isPhotoVideoMode()) "Pick target video" else "Pick target photo"
+            updateTargetUiForMode()
+            targetUri?.let {
+                if (!isTargetAllowed(it)) {
+                    targetUri = null
+                    txtTarget.text = "Target: not selected"
+                }
+            }
         }
 
         btnStart.setOnClickListener {
@@ -138,6 +184,43 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun updateTargetUiForMode() {
+        btnPickTarget.text = if (isPhotoVideoMode()) "Pick target video" else "Pick target photo"
+    }
+
+    private fun launchSelfieCapture() {
+        try {
+            val file = File.createTempFile("selfie_", ".jpg", cacheDir)
+            val uri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", file)
+            pendingSelfieUri = uri
+            takeSelfieLauncher.launch(uri)
+        } catch (e: Exception) {
+            toast("Unable to open camera")
+        }
+    }
+
+    private fun isTargetAllowed(uri: Uri): Boolean {
+        return if (isPhotoVideoMode()) isVideoUri(uri) else isImageUri(uri)
+    }
+
+    private fun isImageUri(uri: Uri): Boolean {
+        val mime = contentResolver.getType(uri)?.lowercase()
+        if (mime != null) {
+            return mime == "image/jpeg" || mime == "image/jpg" || mime == "image/png"
+        }
+        val ext = extensionFromName(getDisplayName(uri))
+        return ext == ".jpg" || ext == ".jpeg" || ext == ".png"
+    }
+
+    private fun isVideoUri(uri: Uri): Boolean {
+        val mime = contentResolver.getType(uri)?.lowercase()
+        if (mime != null) {
+            return mime == "video/mp4" || mime == "video/quicktime"
+        }
+        val ext = extensionFromName(getDisplayName(uri))
+        return ext == ".mp4" || ext == ".mov"
+    }
+
     private fun createApi(baseUrl: String): FaceFusionApi {
         val url = baseUrl.trim().removeSuffix("/") + "/"
         val logger = HttpLoggingInterceptor().apply {
@@ -163,6 +246,18 @@ class MainActivity : AppCompatActivity() {
         val target = targetUri
         if (source == null || target == null) {
             toast("Select source and target")
+            return
+        }
+        if (!isImageUri(source)) {
+            toast("Source must be a photo (jpg/jpeg/png)")
+            return
+        }
+        if (isPhotoVideoMode() && !isVideoUri(target)) {
+            toast("Target must be a video (mp4/mov)")
+            return
+        }
+        if (!isPhotoVideoMode() && !isImageUri(target)) {
+            toast("Target must be a photo (jpg/jpeg/png)")
             return
         }
 
@@ -318,6 +413,37 @@ class MainActivity : AppCompatActivity() {
         return if (trimmed.startsWith("Bearer ", ignoreCase = true)) trimmed else "Bearer $trimmed"
     }
 
+    private fun scheduleAuthCheck() {
+        authCheckJob?.cancel()
+        val rawToken = accessTokenEdit.text.toString().trim()
+        if (rawToken.isEmpty()) {
+            txtAuthStatus.text = "Auth: not set"
+            return
+        }
+        val baseUrl = baseUrlEdit.text.toString().trim()
+        if (baseUrl.isEmpty()) {
+            txtAuthStatus.text = "Auth: base URL missing"
+            return
+        }
+        authCheckJob = lifecycleScope.launch {
+            delay(400)
+            try {
+                val api = createApi(baseUrl)
+                val token = stripBearer(rawToken)
+                val auth = normalizeBearer(token)
+                val resp = api.verify(auth)
+                jwtToken = token
+                txtAuthStatus.text = "Auth: ok (${resp.userId})"
+            } catch (e: Exception) {
+                if (e is HttpException && e.code() == 401) {
+                    txtAuthStatus.text = "Auth: unauthorized"
+                } else {
+                    txtAuthStatus.text = "Auth: error"
+                }
+            }
+        }
+    }
+
     private fun healthCheck() {
         val baseUrl = baseUrlEdit.text.toString().trim()
         if (baseUrl.isEmpty()) {
@@ -450,6 +576,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         sseCall?.cancel()
+        authCheckJob?.cancel()
         super.onDestroy()
     }
 }
@@ -457,6 +584,11 @@ class MainActivity : AppCompatActivity() {
 interface FaceFusionApi {
     @GET("health")
     suspend fun health(): HealthResponse
+
+    @GET("auth/verify")
+    suspend fun verify(
+        @Header("Authorization") auth: String,
+    ): AuthVerifyResponse
 
     @POST("jobs")
     suspend fun createJob(
@@ -504,6 +636,8 @@ interface FaceFusionApi {
 data class JobCreateRequest(@SerializedName("mode") val mode: String)
 
 data class HealthResponse(@SerializedName("status") val status: String)
+
+data class AuthVerifyResponse(@SerializedName("user_id") val userId: String)
 
 data class JobResponse(
     @SerializedName("job_id") val jobId: String,
