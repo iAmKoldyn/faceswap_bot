@@ -159,6 +159,15 @@
             android:layout_height="wrap_content"
             android:text="Source: not selected" />
 
+        <ImageView
+            android:id="@+id/imgSourcePreview"
+            android:layout_width="match_parent"
+            android:layout_height="180dp"
+            android:layout_marginTop="6dp"
+            android:adjustViewBounds="true"
+            android:scaleType="centerCrop"
+            android:visibility="gone" />
+
         <Button
             android:id="@+id/btnPickTarget"
             android:layout_width="match_parent"
@@ -171,6 +180,15 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Target: not selected" />
+
+        <ImageView
+            android:id="@+id/imgTargetPreview"
+            android:layout_width="match_parent"
+            android:layout_height="180dp"
+            android:layout_marginTop="6dp"
+            android:adjustViewBounds="true"
+            android:scaleType="centerCrop"
+            android:visibility="gone" />
 
         <Button
             android:id="@+id/btnStart"

@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Dict, Optional
 import uuid
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile  # pyright: ignore[reportMissingImports]
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel
 
 from .auth import get_current_user, verify_token
@@ -257,7 +257,10 @@ async def job_events(job_id: str, request: Request, user_id: str = Depends(get_c
                 last_payload = data
                 if job_state.get("status") in {"completed", "failed", "cancelled"}:
                     break
-            await asyncio.sleep(1)
+            else:
+                # Keep SSE transport alive when progress is unchanged.
+                yield ": ping\n\n"
+            await asyncio.sleep(0.2)
 
     headers = {
         "Cache-Control": "no-cache",

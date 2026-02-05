@@ -1,8 +1,10 @@
 ﻿package com.facefusion.app
 
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.view.View
 import android.widget.*
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -51,6 +53,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var txtHealth: TextView
     private lateinit var txtJobStatus: TextView
     private lateinit var editJobId: EditText
+    private lateinit var imgSourcePreview: ImageView
+    private lateinit var imgTargetPreview: ImageView
     private lateinit var progressBar: ProgressBar
     private lateinit var imgResult: ImageView
     private lateinit var videoResult: VideoView
@@ -61,6 +65,8 @@ class MainActivity : AppCompatActivity() {
     private var jwtToken: String? = null
     private var authCheckJob: Job? = null
     private var sseCall: okhttp3.Call? = null
+    private var sseObserverJob: Job? = null
+    private var activeJobId: String? = null
     private val gson = Gson()
     private var lastJobId: String? = null
 
@@ -72,6 +78,7 @@ class MainActivity : AppCompatActivity() {
             }
             sourceUri = it
             txtSource.text = "Source: selected"
+            showSourcePreview(it)
         }
     }
 
@@ -84,6 +91,7 @@ class MainActivity : AppCompatActivity() {
             }
             targetUri = it
             txtTarget.text = "Target: selected"
+            showTargetPreview(it)
         }
     }
 
@@ -92,6 +100,7 @@ class MainActivity : AppCompatActivity() {
             pendingSelfieUri?.let {
                 sourceUri = it
                 txtSource.text = "Source: selfie"
+                showSourcePreview(it)
             }
         }
     }
@@ -116,6 +125,8 @@ class MainActivity : AppCompatActivity() {
         txtHealth = findViewById(R.id.txtHealth)
         txtJobStatus = findViewById(R.id.txtJobStatus)
         editJobId = findViewById(R.id.editJobId)
+        imgSourcePreview = findViewById(R.id.imgSourcePreview)
+        imgTargetPreview = findViewById(R.id.imgTargetPreview)
         progressBar = findViewById(R.id.progressBar)
         imgResult = findViewById(R.id.imgResult)
         videoResult = findViewById(R.id.videoResult)
@@ -125,6 +136,7 @@ class MainActivity : AppCompatActivity() {
         }
         txtAuthStatus.text = "Auth: not set"
         updateTargetUiForMode()
+        resetResultPreview()
 
         accessTokenEdit.addTextChangedListener {
             scheduleAuthCheck()
@@ -153,6 +165,7 @@ class MainActivity : AppCompatActivity() {
                 if (!isTargetAllowed(it)) {
                     targetUri = null
                     txtTarget.text = "Target: not selected"
+                    clearTargetPreview()
                 }
             }
         }
@@ -186,6 +199,45 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateTargetUiForMode() {
         btnPickTarget.text = if (isPhotoVideoMode()) "Pick target video" else "Pick target photo"
+    }
+
+    private fun showSourcePreview(uri: Uri) {
+        imgSourcePreview.visibility = View.VISIBLE
+        imgSourcePreview.setImageURI(uri)
+    }
+
+    private fun showTargetPreview(uri: Uri) {
+        imgTargetPreview.visibility = View.VISIBLE
+        if (isVideoUri(uri)) {
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(this, uri)
+                val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                if (frame != null) {
+                    imgTargetPreview.setImageBitmap(frame)
+                } else {
+                    imgTargetPreview.setImageDrawable(null)
+                }
+            } catch (_: Exception) {
+                imgTargetPreview.setImageDrawable(null)
+            } finally {
+                retriever.release()
+            }
+            return
+        }
+        imgTargetPreview.setImageURI(uri)
+    }
+
+    private fun clearTargetPreview() {
+        imgTargetPreview.setImageDrawable(null)
+        imgTargetPreview.visibility = View.GONE
+    }
+
+    private fun resetResultPreview() {
+        imgResult.setImageDrawable(null)
+        imgResult.visibility = View.GONE
+        videoResult.stopPlayback()
+        videoResult.visibility = View.GONE
     }
 
     private fun launchSelfieCapture() {
@@ -267,8 +319,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        imgResult.visibility = ImageView.GONE
-        videoResult.visibility = VideoView.GONE
+        sseObserverJob?.cancel()
+        sseCall?.cancel()
+        activeJobId = null
+        resetResultPreview()
         progressBar.progress = 0
         txtStatus.text = "Status: starting"
 
@@ -281,6 +335,7 @@ class MainActivity : AppCompatActivity() {
                 txtStatus.text = "Status: creating job"
                 val job = api.createJob(JobCreateRequest(currentMode()), auth)
                 txtStatus.text = "Status: created ${job.jobId}"
+                activeJobId = job.jobId
                 lastJobId = job.jobId
                 editJobId.setText(job.jobId)
 
@@ -312,66 +367,99 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun listenJobEvents(baseUrl: String, auth: String, jobId: String) {
+        sseObserverJob?.cancel()
         sseCall?.cancel()
-        val url = baseUrl.trim().removeSuffix("/") + "/jobs/$jobId/events"
-        val request = Request.Builder()
-            .url(url)
-            .addHeader("Authorization", auth)
-            .addHeader("Accept", "text/event-stream")
-            .build()
+        sseObserverJob = lifecycleScope.launch(Dispatchers.IO) {
+            var attempt = 0
+            while (activeJobId == jobId) {
+                val url = baseUrl.trim().removeSuffix("/") + "/jobs/$jobId/events"
+                val request = Request.Builder()
+                    .url(url)
+                    .addHeader("Authorization", auth)
+                    .addHeader("Accept", "text/event-stream")
+                    .build()
 
-        val client = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.MILLISECONDS)
-            .build()
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(30, TimeUnit.SECONDS)
+                    .readTimeout(0, TimeUnit.MILLISECONDS)
+                    .retryOnConnectionFailure(true)
+                    .build()
 
-        sseCall = client.newCall(request)
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val response = sseCall?.execute() ?: return@launch
-                if (!response.isSuccessful) {
-                    postStatus("Error: SSE ${response.code}")
-                    response.close()
-                    return@launch
+                try {
+                    sseCall = client.newCall(request)
+                    val response = sseCall?.execute() ?: break
+                    if (!response.isSuccessful) {
+                        postStatus("Error: SSE ${response.code}")
+                        response.close()
+                        delay(1500)
+                        continue
+                    }
+                    if (attempt > 0) {
+                        postStatus("Status: SSE reconnected")
+                    }
+                    val completed = streamSse(response, baseUrl, auth, jobId)
+                    if (completed) {
+                        break
+                    }
+                } catch (_: IOException) {
+                    if (activeJobId == jobId) {
+                        postStatus("Status: SSE reconnecting...")
+                    }
                 }
-                streamSse(response, baseUrl, auth, jobId)
-            } catch (e: IOException) {
-                postStatus("Error: SSE connection failed")
+                attempt += 1
+                delay(1500)
             }
         }
     }
 
-    private fun streamSse(response: Response, baseUrl: String, auth: String, jobId: String) {
+    private fun streamSse(response: Response, baseUrl: String, auth: String, jobId: String): Boolean {
+        var completed = false
         response.body?.use { body ->
             val source = body.source()
-            while (!source.exhausted()) {
+            while (!source.exhausted() && activeJobId == jobId) {
                 val line = source.readUtf8Line() ?: continue
                 if (line.isBlank()) continue
                 if (line.startsWith("data:")) {
                     val data = line.removePrefix("data:").trim()
-                    handleJobEvent(data, baseUrl, auth, jobId)
+                    if (handleJobEvent(data, baseUrl, auth, jobId)) {
+                        completed = true
+                        break
+                    }
                 }
             }
         }
+        return completed
     }
 
-    private fun handleJobEvent(data: String, baseUrl: String, auth: String, jobId: String) {
-        val job = runCatching { gson.fromJson(data, JobResponse::class.java) }.getOrNull() ?: return
+    private fun handleJobEvent(data: String, baseUrl: String, auth: String, jobId: String): Boolean {
+        val job = runCatching { gson.fromJson(data, JobResponse::class.java) }.getOrNull() ?: return false
+        if (job.jobId != jobId || activeJobId != jobId) {
+            return false
+        }
         runOnUiThread {
             val stage = job.stage ?: ""
             txtStatus.text = "Status: ${job.status} $stage"
             progressBar.progress = job.progress
         }
         if (job.status == "completed") {
+            activeJobId = null
             sseCall?.cancel()
+            runOnUiThread {
+                txtStatus.text = "Status: completed, downloading..."
+                progressBar.progress = 100
+            }
             lifecycleScope.launch {
                 val api = createApi(baseUrl)
                 downloadResult(api, auth, jobId, job.targetKind)
             }
+            return true
         } else if (job.status == "failed" || job.status == "cancelled") {
+            activeJobId = null
             sseCall?.cancel()
             runOnUiThread { txtStatus.text = "Status: ${job.status}" }
+            return true
         }
+        return false
     }
 
     private fun postStatus(message: String) {
@@ -497,7 +585,7 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun downloadResult(api: FaceFusionApi, auth: String, jobId: String, targetKind: String) {
         val ext = if (targetKind == "video") ".mp4" else ".jpg"
-        val outFile = File(cacheDir, "result$ext")
+        val outFile = File(cacheDir, "result_${jobId}$ext")
         api.getResult(jobId, auth).use { response ->
             response.byteStream().use { input ->
                 FileOutputStream(outFile).use { output ->
@@ -575,7 +663,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        activeJobId = null
         sseCall?.cancel()
+        sseObserverJob?.cancel()
         authCheckJob?.cancel()
         super.onDestroy()
     }
