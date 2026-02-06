@@ -12,13 +12,28 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <TextView
-            android:id="@+id/titleText"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="FaceFusion Mobile MVP"
-            android:textSize="20sp"
-            android:textStyle="bold" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/titleText"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="FaceFusion Mobile MVP"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/txtHealth"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Health: unknown"
+                android:textSize="12sp" />
+        </LinearLayout>
 
         <EditText
             android:id="@+id/editBaseUrl"
@@ -58,32 +73,11 @@
             android:layout_marginTop="4dp"
             android:text="Auth: not set" />
 
-        <TextView
-            android:id="@+id/serviceLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Service" />
-
-        <Button
-            android:id="@+id/btnHealth"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Health check" />
-
-        <TextView
-            android:id="@+id/txtHealth"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:text="Health: unknown" />
-
         <EditText
             android:id="@+id/editJobId"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="16dp"
             android:hint="Job ID (optional)"
             android:inputType="textNoSuggestions" />
 
@@ -144,14 +138,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="Take selfie (source)" />
-
-        <Button
-            android:id="@+id/btnPickSource"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Pick source photo (gallery)" />
+            android:text="Source actions" />
 
         <TextView
             android:id="@+id/txtSource"
@@ -173,7 +160,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Pick target (gallery)" />
+            android:text="Pick target" />
 
         <TextView
             android:id="@+id/txtTarget"
@@ -213,20 +200,54 @@
             android:layout_marginTop="8dp"
             android:text="Status: idle" />
 
-        <ImageView
-            android:id="@+id/imgResult"
+        <FrameLayout
+            android:id="@+id/resultImageContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:adjustViewBounds="true"
-            android:visibility="gone" />
+            android:visibility="gone">
 
-        <VideoView
-            android:id="@+id/videoResult"
+            <ImageView
+                android:id="@+id/imgResult"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:adjustViewBounds="true" />
+
+            <ImageButton
+                android:id="@+id/btnSaveResult"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="top|start"
+                android:layout_margin="8dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Save image"
+                android:padding="6dp"
+                android:src="@android:drawable/ic_menu_save" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:id="@+id/resultVideoContainer"
             android:layout_width="match_parent"
             android:layout_height="240dp"
             android:layout_marginTop="12dp"
-            android:visibility="gone" />
+            android:visibility="gone">
+
+            <VideoView
+                android:id="@+id/videoResult"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <ImageButton
+                android:id="@+id/btnSaveVideoResult"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="top|start"
+                android:layout_margin="8dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="Save video"
+                android:padding="6dp"
+                android:src="@android:drawable/ic_menu_save" />
+        </FrameLayout>
 
     </LinearLayout>
 </ScrollView>

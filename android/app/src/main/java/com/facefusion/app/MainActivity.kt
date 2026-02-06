@@ -2,14 +2,21 @@
 
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.content.ContentValues
+import android.content.Context
+import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.OpenableColumns
+import android.provider.MediaStore
 import android.view.View
 import android.widget.*
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.FileProvider
 import androidx.core.widget.addTextChangedListener
 import androidx.lifecycle.lifecycleScope
@@ -18,6 +25,7 @@ import com.google.gson.annotations.SerializedName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
@@ -41,10 +49,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var accessTokenEdit: EditText
     private lateinit var radioMode: RadioGroup
     private lateinit var btnTakeSelfie: Button
-    private lateinit var btnPickSource: Button
     private lateinit var btnPickTarget: Button
     private lateinit var btnStart: Button
-    private lateinit var btnHealth: Button
     private lateinit var btnCheckJob: Button
     private lateinit var txtSource: TextView
     private lateinit var txtTarget: TextView
@@ -55,6 +61,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var editJobId: EditText
     private lateinit var imgSourcePreview: ImageView
     private lateinit var imgTargetPreview: ImageView
+    private lateinit var resultImageContainer: FrameLayout
+    private lateinit var btnSaveResult: ImageButton
+    private lateinit var resultVideoContainer: FrameLayout
+    private lateinit var btnSaveVideoResult: ImageButton
     private lateinit var progressBar: ProgressBar
     private lateinit var imgResult: ImageView
     private lateinit var videoResult: VideoView
@@ -64,35 +74,36 @@ class MainActivity : AppCompatActivity() {
     private var pendingSelfieUri: Uri? = null
     private var jwtToken: String? = null
     private var authCheckJob: Job? = null
+    private var healthMonitorJob: Job? = null
     private var sseCall: okhttp3.Call? = null
     private var sseObserverJob: Job? = null
+    private var statusWatchdogJob: Job? = null
     private var activeJobId: String? = null
+    private var isJobRunning: Boolean = false
+    private var currentResultImageFile: File? = null
+    private var currentResultVideoFile: File? = null
+    private var downloadingJobId: String? = null
     private val gson = Gson()
     private var lastJobId: String? = null
 
+    private val prefs by lazy {
+        getSharedPreferences("facefusion_mobile_prefs", Context.MODE_PRIVATE)
+    }
+
     private val pickSourceLauncher = registerForActivityResult(PickVisualMedia()) { uri ->
-        uri?.let {
-            if (!isImageUri(it)) {
-                toast("Source must be a photo (jpg/jpeg/png)")
-                return@let
-            }
-            sourceUri = it
-            txtSource.text = "Source: selected"
-            showSourcePreview(it)
-        }
+        uri?.let { handleSelectedSource(it, "Source: selected (gallery)") }
+    }
+
+    private val pickSourceFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { handleSelectedSource(it, "Source: selected (files)") }
     }
 
     private val pickTargetLauncher = registerForActivityResult(PickVisualMedia()) { uri ->
-        uri?.let {
-            if (!isTargetAllowed(it)) {
-                val expected = if (isPhotoVideoMode()) "video (mp4/mov)" else "photo (jpg/jpeg/png)"
-                toast("Target must be $expected")
-                return@let
-            }
-            targetUri = it
-            txtTarget.text = "Target: selected"
-            showTargetPreview(it)
-        }
+        uri?.let { handleSelectedTarget(it, "Target: selected (gallery)") }
+    }
+
+    private val pickTargetFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { handleSelectedTarget(it, "Target: selected (files)") }
     }
 
     private val takeSelfieLauncher = registerForActivityResult(ActivityResultContracts.TakePicture()) { success ->
@@ -113,10 +124,8 @@ class MainActivity : AppCompatActivity() {
         accessTokenEdit = findViewById(R.id.editAccessToken)
         radioMode = findViewById(R.id.radioMode)
         btnTakeSelfie = findViewById(R.id.btnTakeSelfie)
-        btnPickSource = findViewById(R.id.btnPickSource)
         btnPickTarget = findViewById(R.id.btnPickTarget)
         btnStart = findViewById(R.id.btnStart)
-        btnHealth = findViewById(R.id.btnHealth)
         btnCheckJob = findViewById(R.id.btnCheckJob)
         txtSource = findViewById(R.id.txtSource)
         txtTarget = findViewById(R.id.txtTarget)
@@ -127,6 +136,10 @@ class MainActivity : AppCompatActivity() {
         editJobId = findViewById(R.id.editJobId)
         imgSourcePreview = findViewById(R.id.imgSourcePreview)
         imgTargetPreview = findViewById(R.id.imgTargetPreview)
+        resultImageContainer = findViewById(R.id.resultImageContainer)
+        btnSaveResult = findViewById(R.id.btnSaveResult)
+        resultVideoContainer = findViewById(R.id.resultVideoContainer)
+        btnSaveVideoResult = findViewById(R.id.btnSaveVideoResult)
         progressBar = findViewById(R.id.progressBar)
         imgResult = findViewById(R.id.imgResult)
         videoResult = findViewById(R.id.videoResult)
@@ -134,33 +147,37 @@ class MainActivity : AppCompatActivity() {
         if (BuildConfig.DEFAULT_BASE_URL.isNotBlank()) {
             baseUrlEdit.setText(BuildConfig.DEFAULT_BASE_URL)
         }
-        txtAuthStatus.text = "Auth: not set"
-        updateTargetUiForMode()
+        val savedBaseUrl = prefs.getString("base_url", "").orEmpty()
+        if (savedBaseUrl.isNotBlank()) {
+            baseUrlEdit.setText(savedBaseUrl)
+        }
+        val savedToken = prefs.getString("auth_token", "").orEmpty()
+        if (savedToken.isNotBlank()) {
+            accessTokenEdit.setText(savedToken)
+            jwtToken = savedToken
+            txtAuthStatus.text = "Auth: token restored"
+        } else {
+            txtAuthStatus.text = "Auth: not set"
+        }
+        updateActionButtonForMode()
         resetResultPreview()
 
         accessTokenEdit.addTextChangedListener {
+            prefs.edit().putString("auth_token", accessTokenEdit.text.toString().trim()).apply()
+            scheduleAuthCheck()
+        }
+        baseUrlEdit.addTextChangedListener {
+            prefs.edit().putString("base_url", baseUrlEdit.text.toString().trim()).apply()
+            startHealthMonitor()
             scheduleAuthCheck()
         }
 
         btnTakeSelfie.setOnClickListener {
-            launchSelfieCapture()
-        }
-
-        btnPickSource.setOnClickListener {
-            pickSourceLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-        }
-
-        btnPickTarget.setOnClickListener {
-            val request = if (isPhotoVideoMode()) {
-                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
-            } else {
-                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-            }
-            pickTargetLauncher.launch(request)
+            showSourceActionsDialog()
         }
 
         radioMode.setOnCheckedChangeListener { _, _ ->
-            updateTargetUiForMode()
+            updateActionButtonForMode()
             targetUri?.let {
                 if (!isTargetAllowed(it)) {
                     targetUri = null
@@ -170,12 +187,19 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        btnStart.setOnClickListener {
-            startJob()
+        btnPickTarget.setOnClickListener {
+            showTargetActionsDialog()
         }
 
-        btnHealth.setOnClickListener {
-            healthCheck()
+        btnSaveResult.setOnClickListener {
+            saveResultImageToGallery()
+        }
+        btnSaveVideoResult.setOnClickListener {
+            saveResultVideoToGallery()
+        }
+
+        btnStart.setOnClickListener {
+            startJob()
         }
 
         btnCheckJob.setOnClickListener {
@@ -197,8 +221,95 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateTargetUiForMode() {
-        btnPickTarget.text = if (isPhotoVideoMode()) "Pick target video" else "Pick target photo"
+    private fun updateActionButtonForMode() {
+        btnTakeSelfie.text = "Source actions"
+        btnPickTarget.text = if (isPhotoVideoMode()) {
+            "Target actions (video)"
+        } else {
+            "Target actions (photo)"
+        }
+    }
+
+    private fun showSourceActionsDialog() {
+        val actions = arrayOf(
+            "Take selfie (source)",
+            "Pick source photo (gallery)",
+            "Pick source photo (files)",
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Source actions")
+            .setItems(actions) { _, which ->
+                when (which) {
+                    0 -> launchSelfieCapture()
+                    1 -> launchSourcePicker()
+                    2 -> launchSourceFilePicker()
+                }
+            }
+            .show()
+    }
+
+    private fun showTargetActionsDialog() {
+        val targetLabel = if (isPhotoVideoMode()) "video" else "photo"
+        val actions = arrayOf(
+            "Pick target $targetLabel (gallery)",
+            "Pick target $targetLabel (files)",
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Target actions")
+            .setItems(actions) { _, which ->
+                when (which) {
+                    0 -> launchTargetPicker()
+                    1 -> launchTargetFilePicker()
+                }
+            }
+            .show()
+    }
+
+    private fun launchSourcePicker() {
+        pickSourceLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+
+    private fun launchSourceFilePicker() {
+        pickSourceFileLauncher.launch(arrayOf("image/*"))
+    }
+
+    private fun launchTargetPicker() {
+        val request = if (isPhotoVideoMode()) {
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
+        } else {
+            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+        }
+        pickTargetLauncher.launch(request)
+    }
+
+    private fun launchTargetFilePicker() {
+        val mimeTypes = if (isPhotoVideoMode()) {
+            arrayOf("video/*", "video/mp4", "video/quicktime")
+        } else {
+            arrayOf("image/*")
+        }
+        pickTargetFileLauncher.launch(mimeTypes)
+    }
+
+    private fun handleSelectedSource(uri: Uri, label: String) {
+        if (!isImageUri(uri)) {
+            toast("Source must be a photo (jpg/jpeg/png)")
+            return
+        }
+        sourceUri = uri
+        txtSource.text = label
+        showSourcePreview(uri)
+    }
+
+    private fun handleSelectedTarget(uri: Uri, label: String) {
+        if (!isTargetAllowed(uri)) {
+            val expected = if (isPhotoVideoMode()) "video (mp4/mov)" else "photo (jpg/jpeg/png)"
+            toast("Target must be $expected")
+            return
+        }
+        targetUri = uri
+        txtTarget.text = label
+        showTargetPreview(uri)
     }
 
     private fun showSourcePreview(uri: Uri) {
@@ -235,7 +346,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun resetResultPreview() {
         imgResult.setImageDrawable(null)
-        imgResult.visibility = View.GONE
+        resultImageContainer.visibility = View.GONE
+        btnSaveResult.visibility = View.GONE
+        currentResultImageFile = null
+        resultVideoContainer.visibility = View.GONE
+        btnSaveVideoResult.visibility = View.GONE
+        currentResultVideoFile = null
         videoResult.stopPlayback()
         videoResult.visibility = View.GONE
     }
@@ -294,6 +410,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startJob() {
+        if (isJobRunning) {
+            toast("Wait until current job is finished")
+            return
+        }
         val source = sourceUri
         val target = targetUri
         if (source == null || target == null) {
@@ -321,7 +441,10 @@ class MainActivity : AppCompatActivity() {
 
         sseObserverJob?.cancel()
         sseCall?.cancel()
+        statusWatchdogJob?.cancel()
         activeJobId = null
+        downloadingJobId = null
+        setJobRunningState(true)
         resetResultPreview()
         progressBar.progress = 0
         txtStatus.text = "Status: starting"
@@ -329,7 +452,11 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val api = createApi(baseUrl)
-                val token = resolveToken() ?: return@launch
+                val token = resolveToken()
+                if (token == null) {
+                    setJobRunningState(false)
+                    return@launch
+                }
                 val auth = normalizeBearer(token)
 
                 txtStatus.text = "Status: creating job"
@@ -354,6 +481,7 @@ class MainActivity : AppCompatActivity() {
                 txtStatus.text = "Status: submitting"
                 api.submitJob(job.jobId, auth, emptyMap())
 
+                startStatusWatchdog(baseUrl, auth, job.jobId)
                 listenJobEvents(baseUrl, auth, job.jobId)
             } catch (e: Exception) {
                 if (e is HttpException && e.code() == 401) {
@@ -362,6 +490,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     txtStatus.text = "Error: ${e.message}"
                 }
+                setJobRunningState(false)
             }
         }
     }
@@ -401,13 +530,53 @@ class MainActivity : AppCompatActivity() {
                     if (completed) {
                         break
                     }
+                    if (reconcileJobStatus(baseUrl, auth, jobId)) {
+                        break
+                    }
                 } catch (_: IOException) {
                     if (activeJobId == jobId) {
                         postStatus("Status: SSE reconnecting...")
                     }
+                    if (reconcileJobStatus(baseUrl, auth, jobId)) {
+                        break
+                    }
                 }
                 attempt += 1
                 delay(1500)
+            }
+        }
+    }
+
+    private fun startStatusWatchdog(baseUrl: String, auth: String, jobId: String) {
+        statusWatchdogJob?.cancel()
+        statusWatchdogJob = lifecycleScope.launch {
+            while (isActive && activeJobId == jobId) {
+                try {
+                    val api = createApi(baseUrl)
+                    val job = api.getJob(jobId, auth)
+                    val formatted = formatStatus(job.status, job.stage)
+                    txtJobStatus.text = "Job: $formatted (${job.progress}%)"
+                    if (job.status == "completed") {
+                        if (activeJobId == jobId) {
+                            activeJobId = null
+                            txtStatus.text = "Status: completed, downloading..."
+                            progressBar.progress = 100
+                            launchResultDownload(baseUrl, auth, jobId, job.targetKind)
+                        }
+                        break
+                    }
+                    if (job.status == "failed" || job.status == "cancelled") {
+                        if (activeJobId == jobId) {
+                            activeJobId = null
+                            txtStatus.text = "Status: ${job.status}"
+                            setJobRunningState(false)
+                        }
+                        break
+                    }
+                } catch (_: Exception) {
+                    // Ignore transient network issues; SSE may still deliver updates.
+                }
+                delay(2000)
             }
         }
     }
@@ -437,8 +606,7 @@ class MainActivity : AppCompatActivity() {
             return false
         }
         runOnUiThread {
-            val stage = job.stage ?: ""
-            txtStatus.text = "Status: ${job.status} $stage"
+            txtStatus.text = "Status: ${formatStatus(job.status, job.stage)}"
             progressBar.progress = job.progress
         }
         if (job.status == "completed") {
@@ -448,18 +616,75 @@ class MainActivity : AppCompatActivity() {
                 txtStatus.text = "Status: completed, downloading..."
                 progressBar.progress = 100
             }
-            lifecycleScope.launch {
-                val api = createApi(baseUrl)
-                downloadResult(api, auth, jobId, job.targetKind)
-            }
+            launchResultDownload(baseUrl, auth, jobId, job.targetKind)
             return true
         } else if (job.status == "failed" || job.status == "cancelled") {
             activeJobId = null
             sseCall?.cancel()
-            runOnUiThread { txtStatus.text = "Status: ${job.status}" }
+            runOnUiThread {
+                txtStatus.text = "Status: ${job.status}"
+            }
+            setJobRunningState(false)
             return true
         }
         return false
+    }
+
+    private suspend fun reconcileJobStatus(baseUrl: String, auth: String, jobId: String): Boolean {
+        if (activeJobId != jobId) {
+            return true
+        }
+        return try {
+            val api = createApi(baseUrl)
+            val job = api.getJob(jobId, auth)
+            if (job.jobId != jobId || activeJobId != jobId) {
+                return true
+            }
+            runOnUiThread {
+                txtStatus.text = "Status: ${formatStatus(job.status, job.stage)}"
+                progressBar.progress = job.progress
+            }
+            when (job.status) {
+                "completed" -> {
+                    activeJobId = null
+                    runOnUiThread {
+                        txtStatus.text = "Status: completed, downloading..."
+                        progressBar.progress = 100
+                    }
+                    launchResultDownload(baseUrl, auth, jobId, job.targetKind)
+                    true
+                }
+                "failed", "cancelled" -> {
+                    activeJobId = null
+                    runOnUiThread {
+                        txtStatus.text = "Status: ${job.status}"
+                    }
+                    setJobRunningState(false)
+                    true
+                }
+                else -> false
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun launchResultDownload(baseUrl: String, auth: String, jobId: String, targetKind: String) {
+        if (downloadingJobId == jobId) {
+            return
+        }
+        downloadingJobId = jobId
+        lifecycleScope.launch {
+            try {
+                val api = createApi(baseUrl)
+                downloadResult(api, auth, jobId, targetKind)
+            } catch (e: Exception) {
+                txtStatus.text = "Error: ${e.message ?: "download failed"}"
+            } finally {
+                downloadingJobId = null
+                setJobRunningState(false)
+            }
+        }
     }
 
     private fun postStatus(message: String) {
@@ -532,24 +757,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun healthCheck() {
-        val baseUrl = baseUrlEdit.text.toString().trim()
-        if (baseUrl.isEmpty()) {
-            toast("Base URL is empty")
-            return
-        }
-        txtHealth.text = "Health: checking"
-        lifecycleScope.launch {
-            try {
-                val api = createApi(baseUrl)
-                val health = api.health()
-                txtHealth.text = "Health: ${health.status}"
-            } catch (e: Exception) {
-                txtHealth.text = "Health: error"
-            }
-        }
-    }
-
     private fun checkJobStatus() {
         val baseUrl = baseUrlEdit.text.toString().trim()
         if (baseUrl.isEmpty()) {
@@ -568,10 +775,16 @@ class MainActivity : AppCompatActivity() {
             try {
                 val api = createApi(baseUrl)
                 val job = api.getJob(jobId, auth)
-                val stage = job.stage ?: ""
-                txtJobStatus.text = "Job: ${job.status} $stage (${job.progress}%)"
-                txtStatus.text = "Status: ${job.status} $stage"
+                val formatted = formatStatus(job.status, job.stage)
+                txtJobStatus.text = "Job: $formatted (${job.progress}%)"
+                txtStatus.text = "Status: $formatted"
                 progressBar.progress = job.progress
+                if (job.status == "completed" || job.status == "failed" || job.status == "cancelled") {
+                    if (activeJobId == job.jobId) {
+                        activeJobId = null
+                    }
+                    setJobRunningState(false)
+                }
             } catch (e: Exception) {
                 if (e is HttpException && e.code() == 401) {
                     txtAuthStatus.text = "Auth: unauthorized"
@@ -594,14 +807,160 @@ class MainActivity : AppCompatActivity() {
             }
         }
         if (targetKind == "video") {
+            currentResultVideoFile = outFile
+            resultVideoContainer.visibility = View.VISIBLE
+            btnSaveVideoResult.visibility = View.VISIBLE
+            resultImageContainer.visibility = View.GONE
             videoResult.visibility = VideoView.VISIBLE
-            imgResult.visibility = ImageView.GONE
             videoResult.setVideoPath(outFile.absolutePath)
             videoResult.start()
         } else {
-            imgResult.visibility = ImageView.VISIBLE
-            videoResult.visibility = VideoView.GONE
+            currentResultImageFile = outFile
+            resultImageContainer.visibility = View.VISIBLE
+            btnSaveResult.visibility = View.VISIBLE
+            resultVideoContainer.visibility = View.GONE
+            btnSaveVideoResult.visibility = View.GONE
+            currentResultVideoFile = null
+            videoResult.visibility = View.GONE
             imgResult.setImageURI(Uri.fromFile(outFile))
+        }
+    }
+
+    private suspend fun updateHealthIndicator(baseUrl: String) {
+        val healthy = try {
+            val api = createApi(baseUrl)
+            api.health().status.equals("ok", ignoreCase = true)
+        } catch (_: Exception) {
+            false
+        }
+        runOnUiThread {
+            if (healthy) {
+                txtHealth.text = "Health: \u2714 online"
+                txtHealth.setTextColor(Color.parseColor("#2E7D32"))
+            } else {
+                txtHealth.text = "Health: \u2716 offline"
+                txtHealth.setTextColor(Color.parseColor("#C62828"))
+            }
+        }
+    }
+
+    private fun formatStatus(status: String, stage: String?): String {
+        val s = status.trim()
+        val st = stage?.trim().orEmpty()
+        if (st.isBlank() || st.equals(s, ignoreCase = true)) {
+            return s
+        }
+        return "$s $st"
+    }
+
+    private fun startHealthMonitor() {
+        healthMonitorJob?.cancel()
+        val baseUrl = baseUrlEdit.text.toString().trim()
+        if (baseUrl.isEmpty()) {
+            txtHealth.text = "Health: base URL missing"
+            txtHealth.setTextColor(Color.parseColor("#C62828"))
+            return
+        }
+        healthMonitorJob = lifecycleScope.launch {
+            while (isActive) {
+                updateHealthIndicator(baseUrl)
+                delay(10000)
+            }
+        }
+    }
+
+    private fun saveResultImageToGallery() {
+        val imageFile = currentResultImageFile
+        if (imageFile == null || !imageFile.exists()) {
+            toast("No image result to save")
+            return
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            val saved = runCatching {
+                val mime = when (imageFile.extension.lowercase()) {
+                    "png" -> "image/png"
+                    else -> "image/jpeg"
+                }
+                val filename = "faceswap_${System.currentTimeMillis()}.${imageFile.extension.ifBlank { "jpg" }}"
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+                    put(MediaStore.Images.Media.MIME_TYPE, mime)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/FaceFusion")
+                        put(MediaStore.Images.Media.IS_PENDING, 1)
+                    }
+                }
+                val resolver = contentResolver
+                val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IOException("Unable to create gallery item")
+                resolver.openOutputStream(uri)?.use { output ->
+                    imageFile.inputStream().use { input ->
+                        input.copyTo(output)
+                    }
+                } ?: throw IOException("Unable to open gallery stream")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val done = ContentValues().apply {
+                        put(MediaStore.Images.Media.IS_PENDING, 0)
+                    }
+                    resolver.update(uri, done, null, null)
+                }
+                uri
+            }.isSuccess
+            runOnUiThread {
+                if (saved) {
+                    toast("Saved to gallery")
+                } else {
+                    toast("Failed to save image")
+                }
+            }
+        }
+    }
+
+    private fun saveResultVideoToGallery() {
+        val videoFile = currentResultVideoFile
+        if (videoFile == null || !videoFile.exists()) {
+            toast("No video result to save")
+            return
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            val saved = runCatching {
+                val mime = when (videoFile.extension.lowercase()) {
+                    "mov" -> "video/quicktime"
+                    else -> "video/mp4"
+                }
+                val ext = videoFile.extension.ifBlank { "mp4" }
+                val filename = "faceswap_${System.currentTimeMillis()}.$ext"
+                val values = ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, filename)
+                    put(MediaStore.Video.Media.MIME_TYPE, mime)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/FaceFusion")
+                        put(MediaStore.Video.Media.IS_PENDING, 1)
+                    }
+                }
+                val resolver = contentResolver
+                val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IOException("Unable to create gallery item")
+                resolver.openOutputStream(uri)?.use { output ->
+                    videoFile.inputStream().use { input ->
+                        input.copyTo(output)
+                    }
+                } ?: throw IOException("Unable to open gallery stream")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val done = ContentValues().apply {
+                        put(MediaStore.Video.Media.IS_PENDING, 0)
+                    }
+                    resolver.update(uri, done, null, null)
+                }
+                uri
+            }.isSuccess
+            runOnUiThread {
+                if (saved) {
+                    toast("Video saved to gallery")
+                } else {
+                    toast("Failed to save video")
+                }
+            }
         }
     }
 
@@ -662,11 +1021,33 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
+    private fun setJobRunningState(running: Boolean) {
+        isJobRunning = running
+        runOnUiThread {
+            btnStart.isEnabled = !running
+            btnStart.text = if (running) "Processing..." else "Start job"
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        startHealthMonitor()
+    }
+
+    override fun onStop() {
+        healthMonitorJob?.cancel()
+        super.onStop()
+    }
+
     override fun onDestroy() {
+        setJobRunningState(false)
         activeJobId = null
+        downloadingJobId = null
         sseCall?.cancel()
         sseObserverJob?.cancel()
+        statusWatchdogJob?.cancel()
         authCheckJob?.cancel()
+        healthMonitorJob?.cancel()
         super.onDestroy()
     }
 }
